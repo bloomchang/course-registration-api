@@ -3,7 +3,11 @@ import re
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, UploadFile
 
+from students import router as student_router
+
 app = FastAPI()
+app.state.students = {}
+app.include_router(student_router)
 
 # Courses stay here while the server is running.
 catalog = {}
