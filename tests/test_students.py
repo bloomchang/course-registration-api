@@ -1,12 +1,5 @@
-import os
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
-
-import httpx
-import pytest
-from fastapi.testclient import TestClient
-
-from main import app
 
 
 def transcript(*rows):
@@ -34,17 +27,6 @@ def upload(client, path, html):
     return client.post(
         f"{path}/history/import", files={"file": ("transcript.html", html, "text/html")}
     )
-
-
-@pytest.fixture
-def client():
-    live_url = os.environ.get("CI_API_BASE_URL")
-    if live_url:
-        with httpx.Client(base_url=live_url, trust_env=False) as live_client:
-            yield live_client
-    else:
-        with TestClient(app) as test_client:
-            yield test_client
 
 
 def test_history_import_reads_all_course_tables_and_deduplicates(client):

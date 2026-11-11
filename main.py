@@ -1,27 +1,17 @@
-import re
-
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, UploadFile
 
-from students import router as student_router
+from audit import COURSE_CODE, build_audit_report, normalize_code
+from students import CurrentStudent, router as student_router
 
 app = FastAPI()
 app.state.students = {}
+app.state.catalog = {}
 app.include_router(student_router)
-
-# Courses stay here while the server is running.
-catalog = {}
-
-# Match codes such as COSC 3506, ITEC3506, or MATH 1001.
-CODE_PATTERN = re.compile(r"\b([A-Z]{2,10})\s*(\d{3,4}[A-Z]?)\b")
-
-
-def normalize_code(text):
-    return re.sub(r"\s+", "", text).upper()
 
 
 def extract_codes(text):
-    matches = CODE_PATTERN.findall(text.upper())
+    matches = COURSE_CODE.findall(text.upper())
     codes = [subject + number for subject, number in matches]
 
     # Remove duplicates while keeping their original order.
@@ -66,7 +56,8 @@ async def import_catalog(file: UploadFile):
         values = [cell.get_text(" ", strip=True) for cell in cells]
         code, title, credits_text, prerequisites, cross_listed = values
 
-        if not CODE_PATTERN.fullmatch(code.upper()):
+        course_code = normalize_code(code)
+        if not COURSE_CODE.fullmatch(course_code):
             raise HTTPException(400, f"Invalid course code: {code}")
 
         try:
@@ -76,8 +67,6 @@ async def import_catalog(file: UploadFile):
 
         if not 0 <= credits < float("inf"):
             raise HTTPException(400, f"Invalid credits for {code}")
-
-        course_code = normalize_code(code)
 
         imported[course_code] = {
             "course_code": course_code,
@@ -91,8 +80,7 @@ async def import_catalog(file: UploadFile):
         raise HTTPException(400, "The table contains no courses.")
 
     # Replace the catalog only after the whole file passes validation.
-    catalog.clear()
-    catalog.update(imported)
+    app.state.catalog = imported
 
     return {
         "message": "Catalog imported successfully",
@@ -102,9 +90,15 @@ async def import_catalog(file: UploadFile):
 
 @app.get("/api/v1/catalog/courses/{course_code}")
 def get_course(course_code: str):
-    code = normalize_code(course_code)
-
-    if code not in catalog:
+    course = app.state.catalog.get(normalize_code(course_code))
+    if course is None:
         raise HTTPException(404, "Course not found.")
+    return course
 
-    return catalog[code]
+
+@app.get("/api/v1/students/{student_id}/audit-report")
+def audit_report(student_id: str, student: CurrentStudent, strict: bool = False):
+    try:
+        return build_audit_report(student_id, student, app.state.catalog, strict)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
